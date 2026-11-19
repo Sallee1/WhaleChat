@@ -1,0 +1,35 @@
+<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#ffffff"><title>API 使用 demo</title><meta content="0.1.1" name="application-version"><style>@supports not (height:100dvh){:root{--app-viewport-height:100vh}}</style><!--compat:begin--><style>@supports not (height:100dvh){:root{--app-viewport-height:100vh}}</style><script>
+(function(){
+  var def=function(o,k,v){try{Object.defineProperty(o,k,{value:v,writable:true,configurable:true})}catch(e){o[k]=v}};
+  if(!Array.prototype.at)def(Array.prototype,'at',function(n){var k=Math.trunc(Number(n))||0,l=this.length;if(k<0)k+=l;return k<0||k>=l?void 0:this[k]});
+  if(!String.prototype.at)def(String.prototype,'at',function(n){var s=String(this),k=Math.trunc(Number(n))||0,l=s.length;if(k<0)k+=l;return k<0||k>=l?void 0:s.charAt(k)});
+  if(!Object.hasOwn)def(Object,'hasOwn',function(o,k){return Object.prototype.hasOwnProperty.call(Object(o),k)});
+  if(!Array.prototype.findLast)def(Array.prototype,'findLast',function(f,t){for(var i=this.length-1;i>=0;i--)if(f.call(t,this[i],i,this))return this[i]});
+  if(!Array.prototype.findLastIndex)def(Array.prototype,'findLastIndex',function(f,t){for(var i=this.length-1;i>=0;i--)if(f.call(t,this[i],i,this))return i;return -1});
+  if(!Array.prototype.toReversed)def(Array.prototype,'toReversed',function(){return this.slice().reverse()});
+  if(!Array.prototype.toSorted)def(Array.prototype,'toSorted',function(c){return this.slice().sort(c)});
+  if(!Array.prototype.toSpliced)def(Array.prototype,'toSpliced',function(){var a=this.slice();a.splice.apply(a,arguments);return a});
+  if(!Array.prototype.with)def(Array.prototype,'with',function(i,v){var a=this.slice(),k=Math.trunc(Number(i))||0;if(k<0)k+=a.length;if(k<0||k>=a.length)throw new RangeError('Invalid index');a[k]=v;return a});
+  if(typeof window.structuredClone!=='function'){
+    window.structuredClone=function structuredClone(value){
+      var seen=new WeakMap();
+      function clone(v){
+        if(v===null||typeof v!=='object')return v;
+        if(seen.has(v))return seen.get(v);
+        var tag=Object.prototype.toString.call(v);
+        if(tag==='[object Date]')return new Date(v.getTime());
+        if(tag==='[object RegExp]')return new RegExp(v.source,v.flags);
+        if(tag==='[object ArrayBuffer]')return v.slice(0);
+        if(tag==='[object DataView]')return new DataView(v.buffer.slice(0),v.byteOffset,v.byteLength);
+        if(ArrayBuffer.isView(v))return new v.constructor(v);
+        if(tag==='[object Blob]'||tag==='[object File]'||tag==='[object FileList]'||tag==='[object ImageData]')return v;
+        if(tag==='[object Map]'){var m=new Map();seen.set(v,m);v.forEach(function(val,key){m.set(clone(key),clone(val))});return m}
+        if(tag==='[object Set]'){var st=new Set();seen.set(v,st);v.forEach(function(val){st.add(clone(val))});return st}
+        if(Array.isArray(v)){var arr=[];seen.set(v,arr);for(var i=0;i<v.length;i++)arr[i]=clone(v[i]);return arr}
+        var out={};seen.set(v,out);Object.keys(v).forEach(function(k){out[k]=clone(v[k])});return out
+      }
+      return clone(value);
+    };
+  }
+})();
+</script><!--compat:end--><script defer src="static/js/main.9820cd3a.js"></script><link href="static/css/main.7361e32c.css" rel="stylesheet"></head><body><div id="root"></div></body></html>

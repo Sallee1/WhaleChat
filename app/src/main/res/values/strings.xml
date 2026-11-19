@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">WhaleChat</string>
+    <string name="choose_file">选择文件</string>
+    <string name="choose_photo">选择照片</string>
+    <string name="saved_to">已保存到 %1$s</string>
+
+    <string name="upload_source_title">添加照片</string>
+    <string name="take_photo">拍照</string>
+    <string name="choose_from_album">相册</string>
+
+    <string name="no_camera_app">没有可用的相机应用</string>
+    <string name="camera_failed">拍照失败</string>
+
+    <string name="editor_cancel">取消</string>
+    <string name="editor_done">完成</string>
+    <string name="editor_close">关闭</string>
+    <string name="editor_rotate">旋转</string>
+    <string name="editor_crop">裁剪</string>
+    <string name="editor_brush">画笔</string>
+    <string name="editor_undo">撤销</string>
+    <string name="editor_apply">应用</string>
+    <string name="editor_crop_cancel">取消</string>
+    <string name="editor_crop_hint">拖动框选要保留的区域，之后拖四个角微调</string>
+    <string name="editor_nothing_to_undo">没有可撤销的标记</string>
+    <string name="editor_crop_empty">请先框选区域</string>
+    <string name="editor_loading">加载中…</string>
+    <string name="editor_load_failed">无法打开这张图片</string>
+    <string name="editor_save_failed">保存图片失败</string>
+</resources>

@@ -1,0 +1,17 @@
+.gradle/
+build/
+app/build/
+local.properties
+.idea/
+*.iml
+.DS_Store
+
+# 本地调试脚本与截图，不进仓库
+.shots/
+/Screenshot_*
+
+# 签名材料
+keystore.properties
+*.jks
+*.keystore
+keystore/
