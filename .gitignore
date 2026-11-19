@@ -15,3 +15,7 @@ keystore.properties
 *.jks
 *.keystore
 keystore/
+
+# local test data
+/deepseek_data-*.zip
+/设置页.jpg

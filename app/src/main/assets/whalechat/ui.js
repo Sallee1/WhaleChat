@@ -74,6 +74,11 @@
     '  border-right:1.5px solid var(--wc-muted); transform:rotate(45deg); opacity:.75; }',
     '.wc-danger .wc-label, .wc-danger .wc-value { color:#f2555a; }',
     '.wc-foot { padding:26px 10px 0; font-size:12px; line-height:1.8; color:var(--wc-muted); text-align:center; }',
+    '.wc-dim { opacity:.45; }',
+    '.wc-toast { position:fixed; left:50%; bottom:96px; transform:translate(-50%,8px); z-index:2147483600;',
+    '  max-width:74vw; padding:10px 16px; border-radius:10px; background:rgba(20,22,28,.92); color:#fff;',
+    '  font-size:13px; line-height:1.45; text-align:center; opacity:0; pointer-events:none; transition:opacity .16s, transform .16s; }',
+    '.wc-toast-on { opacity:1; transform:translate(-50%,0); }',
 
     '.wc-mask { position:fixed; inset:0; z-index:2147483001; background:var(--wc-mask);',
     '  display:flex; flex-direction:column; justify-content:flex-end; }',
@@ -195,6 +200,8 @@
       keyPlaceholder: '请输入 API Key', save: '保存', keyEmpty: '请输入 API Key',
       keyChecking: '正在校验…', keySaved: '已保存', keyFailed: '校验失败，请检查 API Key',
       keyNoInput: '无法定位 API Key 输入框', keyTimeout: '校验超时，请稍后重试',
+      exportEmpty: '暂无可导出的历史对话', importFailed: '导入失败，请选择 DeepSeek 导出的 ZIP 文件',
+      importing: '正在导入…', exportSaved: '已保存到 Download/WhaleChat',
       aboutVer: '版本 ', aboutIntro: 'WhaleChat 是一个基于 DeepSeek 官方开源 Chat-Demo 封装的 Android 客户端，' +
         '使用系统 WebView 承载界面，并补齐了拍照、相册、图片编辑、文件下载等原生能力。',
       aboutUnofficial: '非官方说明',
@@ -219,6 +226,8 @@
       keyPlaceholder: 'Enter your API key', save: 'Save', keyEmpty: 'Please enter an API key',
       keyChecking: 'Verifying…', keySaved: 'Saved', keyFailed: 'Invalid API key, please check and retry',
       keyNoInput: 'API key field not found', keyTimeout: 'Verification timed out, try again later',
+      exportEmpty: 'No chats to export yet', importFailed: 'Import failed. Pick a ZIP exported by DeepSeek.',
+      importing: 'Importing…', exportSaved: 'Saved to Download/WhaleChat',
       aboutVer: 'Version ', aboutIntro: 'WhaleChat is an Android client built on DeepSeek\'s open-source Chat-Demo. ' +
         'It renders the UI in the system WebView and adds native camera, gallery, image editing and file download support.',
       aboutUnofficial: 'Not official',
@@ -448,6 +457,93 @@
     return { ok: false, message: t('keyTimeout') };
   }
 
+  /* 轻提示（引擎的按钮有时点不动，需要给个反馈） */
+  var toastTimer = 0;
+
+  function toast(msg) {
+    var el = q('.wc-toast');
+    if (!el) {
+      el = document.createElement('div');
+      el.className = 'wc-toast';
+      document.body.appendChild(el);
+    }
+    el.textContent = msg;
+    el.classList.add('wc-toast-on');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(function () {
+      el.classList.remove('wc-toast-on');
+    }, 2200);
+  }
+
+  /* 导入历史对话：原生开 DocumentsUI → 文件复制到 cache → 页面 fetch 成 File 喂给引擎 */
+
+  var importSeq = 0;
+  var importWaiters = {};
+
+  window.__whaleImportReady = function (id, url) {
+    var w = importWaiters[id];
+    delete importWaiters[id];
+    if (w) w(url);
+  };
+
+  window.__whaleImportCancelled = function (id) {
+    window.__whaleImportReady(id, null);
+  };
+
+  function pickImportFile() {
+    return new Promise(function (resolve) {
+      var bridge = window.AndroidBridge;
+      if (!bridge || !bridge.pickImportZip) { resolve(null); return; }
+      var id = ++importSeq;
+      importWaiters[id] = resolve;
+      try {
+        bridge.pickImportZip(id);
+      } catch (e) {
+        delete importWaiters[id];
+        resolve(null);
+      }
+      setTimeout(function () {
+        if (importWaiters[id]) { delete importWaiters[id]; resolve(null); }
+      }, 5 * 60 * 1000);
+    });
+  }
+
+  async function importHistory() {
+    var url = await pickImportFile();
+    if (!url) return;
+    toast(t('importing'));
+    try {
+      var res = await fetch(url);
+      var blob = await res.blob();
+      var file = new File([blob], 'history.zip', { type: 'application/zip' });
+      await useTab(1);
+      var cell = engineCells()[1];
+      var input = cell ? q('input[type="file"]', cell) : null;
+      if (!input) { toast(t('importFailed')); return; }
+      var dt = new DataTransfer();
+      dt.items.add(file);
+      input.files = dt.files;
+      input.dispatchEvent(new Event('change', { bubbles: true }));
+      await waitImportSettled();
+      await refresh();
+    } catch (e) {
+      toast(t('importFailed'));
+    }
+  }
+
+  /** 等引擎的「确认导入 / 正在导入」流程走完，再重读状态 */
+  async function waitImportSettled() {
+    for (var i = 0; i < 30; i++) {
+      await sleep(1000);
+      var busy = qa('[role="dialog"][aria-modal="true"]').some(function (d) {
+        return !q('[role="tablist"]', d);
+      });
+      if (busy) continue;
+      await refresh();
+      if (!state.exportDisabled) return;
+    }
+  }
+
   function openAbout() {
     if (q('.wc-about')) return;
     var mask = document.createElement('div');
@@ -519,8 +615,15 @@
       if (act === 'back') closeSettingsPage();
       else if (act === 'about') openAbout();
       else if (act === 'apikey') openApiKeySheet();
-      else if (act === 'import') runDataAction(1);
-      else if (act === 'export') runDataAction(2);
+      else if (act === 'import') importHistory();
+      else if (act === 'export') {
+        if (state.exportDisabled) toast(t('exportEmpty'));
+        else {
+          runDataAction(2).then(function () {
+            setTimeout(function () { toast(t('exportSaved')); }, 2500);
+          });
+        }
+      }
       else if (act === 'delete') runDataAction(3);
       else if (act === 'theme') openThemeSheet();
       else if (act === 'lang') {
@@ -546,6 +649,8 @@
     set('tts', state.tts);
     set('location', state.location || t('unset'));
     set('about', APP_VERSION || '1.0.0');
+    var exp = q('[data-act="export"]', ui.root);
+    if (exp) exp.classList.toggle('wc-dim', !!state.exportDisabled);
   }
 
   /** 引擎语言变了（用户在「语言」里切换）→ 整页重建，文案跟着换 */
@@ -605,6 +710,8 @@
     hits.forEach(function (n) { n.nodeValue = n.nodeValue.split(OLD_BRAND).join(APP_NAME); });
   }
 
+  var wasHidden = false;
+
   function sync() {
     fixBrand();
     var dialog = engineDialog();
@@ -616,8 +723,19 @@
       var others = qa('[role="dialog"][aria-modal="true"]').filter(function (d) {
         return !q('[role="tablist"]', d);
       });
-      ui.root.style.display = others.length ? 'none' : '';
+      var hiddenNow = others.length > 0;
+      ui.root.style.display = hiddenNow ? 'none' : '';
+      // 确认框关掉后（比如导入完成）重读一次状态，导出按钮才会亮起来
+      if (wasHidden && !hiddenNow) refreshAfterShow();
+      wasHidden = hiddenNow;
     }
+  }
+
+  /** 回到我们自己的界面后多读几次，避开引擎异步落库的延迟 */
+  function refreshAfterShow() {
+    [200, 1200, 3000].forEach(function (delay) {
+      setTimeout(function () { if (ui) refresh(); }, delay);
+    });
   }
 
   var pending = false;

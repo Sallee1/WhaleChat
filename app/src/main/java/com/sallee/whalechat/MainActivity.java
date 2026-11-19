@@ -41,6 +41,7 @@ import org.json.JSONObject;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
+import java.io.InputStream;
 import java.io.OutputStream;
 import java.nio.file.Files;
 import java.util.LinkedHashMap;
@@ -59,30 +60,44 @@ public class MainActivity extends Activity {
     private static final int REQ_ALBUM = 1004;
     private static final int REQ_EDIT_CAMERA = 1005;
     private static final int REQ_EDIT_WEB = 1006;
+    private static final int REQ_IMPORT_ZIP = 1007;
 
     /**
      * chat-demo 导出历史时用 Blob + <a download> 触发下载，WebView 默认不处理 blob:。
-     * 这里拦截点击，把 Blob 读成 dataURL 交给原生侧落盘。
+     * 这里把 Blob 读成 dataURL 交给原生侧落盘。
+     * 注意：页面是 createElement('a') 后直接 a.click()，锚点没插进文档，
+     * 事件不会冒泡/捕获到 document，所以既要拦事件，也要拦 HTMLAnchorElement.prototype.click。
      */
     private static final String BLOB_DOWNLOAD_HOOK = """
             (function () {
               if (window.__androidDownloadHook) return;
               window.__androidDownloadHook = true;
+              function save(href, name) {
+                fetch(href).then(function (r) { return r.blob(); }).then(function (b) {
+                  var fr = new FileReader();
+                  fr.onload = function () {
+                    try { window.AndroidBridge.saveFile(name || 'download', String(fr.result)); } catch (err) {}
+                  };
+                  fr.readAsDataURL(b);
+                }).catch(function () {});
+              }
               document.addEventListener('click', function (e) {
                 var a = e.target && e.target.closest ? e.target.closest('a[download]') : null;
                 if (!a) return;
                 var href = a.href || '';
                 if (href.indexOf('blob:') !== 0) return;
                 e.preventDefault();
-                var name = a.getAttribute('download') || 'download';
-                fetch(href).then(function (r) { return r.blob(); }).then(function (b) {
-                  var fr = new FileReader();
-                  fr.onload = function () {
-                    try { window.AndroidBridge.saveFile(name, String(fr.result)); } catch (err) {}
-                  };
-                  fr.readAsDataURL(b);
-                }).catch(function () {});
+                save(href, a.getAttribute('download'));
               }, true);
+              var origClick = HTMLAnchorElement.prototype.click;
+              HTMLAnchorElement.prototype.click = function () {
+                var href = this.href || '';
+                if (href.indexOf('blob:') === 0) {
+                  save(href, this.getAttribute('download'));
+                  return;
+                }
+                return origClick.apply(this, arguments);
+              };
             })();
             """;
 
@@ -212,6 +227,8 @@ public class MainActivity extends Activity {
     private PermissionRequest pendingAudioRequest;
     private File pendingCameraFile;
     private int pendingWebEditId = -1;
+    /** 页面发起的「导入历史对话」请求 id，选择器回来后用它回填。 */
+    private int pendingImportId = -1;
 
     private int transferSeq = 0;
     private final Map<Integer, ImageTransfer> transfers = new LinkedHashMap<>();
@@ -225,6 +242,10 @@ public class MainActivity extends Activity {
 
         final WebViewAssetLoader assetLoader = new WebViewAssetLoader.Builder()
                 .addPathHandler("/assets/", new WebViewAssetLoader.AssetsPathHandler(this))
+                // 导入历史对话时，原生把用户选中的 ZIP 复制到 cache/imports/，
+                // 页面再通过 https://<host>/local/... 以同源方式取回，避免几百 MB 走 base64。
+                .addPathHandler("/local/", new WebViewAssetLoader.InternalStoragePathHandler(
+                        this, importCacheDir()))
                 .build();
 
         webView = new WebView(this);
@@ -380,6 +401,16 @@ public class MainActivity extends Activity {
 
     private File imageCacheDir() {
         File dir = new File(getCacheDir(), "images");
+        if (!dir.exists()) {
+            //noinspection ResultOfMethodCallIgnored
+            dir.mkdirs();
+        }
+        return dir;
+    }
+
+    /** 导入历史对话的临时目录，通过 /local/ 暴露给页面。 */
+    private File importCacheDir() {
+        File dir = new File(getCacheDir(), "imports");
         if (!dir.exists()) {
             //noinspection ResultOfMethodCallIgnored
             dir.mkdirs();
@@ -548,6 +579,11 @@ public class MainActivity extends Activity {
     @Override
     @SuppressWarnings("deprecation")
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        if (requestCode == REQ_IMPORT_ZIP) {
+            deliverImport(resultCode == RESULT_OK && data != null ? data.getData() : null);
+            return;
+        }
+
         if (requestCode == REQ_FILE || requestCode == REQ_ALBUM) {
             deliverFileChooser(urisFromResult(resultCode, data));
             return;
@@ -636,6 +672,64 @@ public class MainActivity extends Activity {
         }
 
         super.onActivityResult(requestCode, resultCode, data);
+    }
+
+    // ------------------------------------------------------------------
+    // 导入历史对话：直接调系统文件选择器（DocumentsUI），选中后复制进 cache，
+    // 再把同源 URL 交给页面，页面 fetch 成 File 喂给 chat-demo 的隐藏 input。
+    // ------------------------------------------------------------------
+
+    private void startImportPicker(int id) {
+        pendingImportId = id;
+        Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+        intent.addCategory(Intent.CATEGORY_OPENABLE);
+        intent.setType("*/*");
+        intent.putExtra(Intent.EXTRA_MIME_TYPES, new String[]{
+                "application/zip", "application/x-zip-compressed", "application/octet-stream"});
+        try {
+            startActivityForResult(intent, REQ_IMPORT_ZIP);
+        } catch (ActivityNotFoundException e) {
+            deliverImport(null);
+        }
+    }
+
+    private void deliverImport(Uri uri) {
+        int id = pendingImportId;
+        pendingImportId = -1;
+
+        File dir = importCacheDir();
+        File[] stale = dir.listFiles();
+        if (stale != null) {
+            for (File f : stale) {
+                //noinspection ResultOfMethodCallIgnored
+                f.delete();
+            }
+        }
+
+        String url = null;
+        if (uri != null) {
+            File out = new File(dir, "import_" + System.currentTimeMillis() + ".zip");
+            try (InputStream in = getContentResolver().openInputStream(uri);
+                 OutputStream os = new FileOutputStream(out)) {
+                if (in != null) {
+                    byte[] buf = new byte[1 << 16];
+                    int n;
+                    while ((n = in.read(buf)) > 0) {
+                        os.write(buf, 0, n);
+                    }
+                    os.flush();
+                    url = "https://" + ASSET_HOST + "/local/" + out.getName();
+                }
+            } catch (IOException e) {
+                //noinspection ResultOfMethodCallIgnored
+                out.delete();
+                url = null;
+            }
+        }
+
+        evaluateJavascript(url != null
+                ? "window.__whaleImportReady(" + id + "," + JSONObject.quote(url) + ");"
+                : "window.__whaleImportCancelled(" + id + ");");
     }
 
     private void openCameraEditor(File photo) {
@@ -852,6 +946,15 @@ public class MainActivity extends Activity {
             } catch (Exception e) {
                 return "";
             }
+        }
+
+        /**
+         * 导入历史对话：页面传入请求 id，原生打开系统文件选择器（DocumentsUI）。
+         * 选完后回调 window.__whaleImportReady(id, url) 或 __whaleImportCancelled(id)。
+         */
+        @JavascriptInterface
+        public void pickImportZip(final int id) {
+            activity.runOnUiThread(() -> activity.startImportPicker(id));
         }
     }
 
