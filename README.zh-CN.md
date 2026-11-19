@@ -92,6 +92,7 @@ adb forward tcp:9222 localabstract:webview_devtools_remote_<pid>
   - `BLOB_DOWNLOAD_HOOK` —— 拦截 `a[download]` 的 `blob:` 地址；
   - `IMAGE_TOOLS_HOOK` —— 拦截附件缩略图与已发送图片的点击；`window.__androidImageEdited(id, dataUrl)` 把编辑结果写回 file input 并触发 `change`。
 - `ImageEditorView` —— 位图 + 笔迹列表；旋转/裁剪前先把笔迹烘焙进位图。`ImageEditActivity` 按长边 2048 采样输入、按 EXIF 摆正，输出 JPEG 质量 88 到缓存目录。
+- `app/src/main/assets/whalechat/ui.js` —— 界面补丁：把标题/品牌替换成 WhaleChat，并在 chat-demo 自带的设置对话框之上盖一层官方 App 风格的整页设置页。原对话框被 CSS 隐藏后当「无头引擎」用，新页面上每次点击都会转发到引擎的真实控件（读状态、点按钮），所以功能与 chat-demo 完全一致，只是换了一层皮。文案跟随引擎语言（中/英）。新增原生桥 `appVersion()` 供「关于」弹窗显示版本，`window.__whaleBack()` 供返回键先关弹层/设置页。
 
 ## 更新内置网页
 

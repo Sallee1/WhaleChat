@@ -50,6 +50,8 @@ public class MainActivity extends Activity {
 
     private static final String ASSET_HOST = "appassets.androidplatform.net";
     private static final String START_URL = "https://" + ASSET_HOST + "/assets/chat-demo/index.html";
+    /** WhaleChat 自己的界面补丁（标题、官方风格设置页、关于），放在 assets/whalechat/ui.js。 */
+    private static final String UI_PATCH_URL = "https://" + ASSET_HOST + "/assets/whalechat/ui.js";
 
     private static final int REQ_FILE = 1001;
     private static final int REQ_AUDIO = 1002;
@@ -280,6 +282,7 @@ public class MainActivity extends Activity {
                 view.evaluateJavascript(VIEWPORT_FALLBACK, null);
                 view.evaluateJavascript(BLOB_DOWNLOAD_HOOK, null);
                 view.evaluateJavascript(IMAGE_TOOLS_HOOK, null);
+                view.evaluateJavascript(uiPatchLoader(), null);
             }
         });
 
@@ -656,6 +659,18 @@ public class MainActivity extends Activity {
         }
     }
 
+    /** 注入 WhaleChat 界面补丁脚本（带版本号，避免升级后命中 WebView 缓存）。 */
+    private String uiPatchLoader() {
+        long version = 0;
+        try {
+            version = getPackageManager().getPackageInfo(getPackageName(), 0).getLongVersionCode();
+        } catch (Exception ignored) {
+        }
+        return "(function(){if(document.getElementById('whale-ui'))return;" +
+                "var s=document.createElement('script');s.id='whale-ui';s.src='" + UI_PATCH_URL +
+                "?v=" + version + "';document.head.appendChild(s);})();";
+    }
+
     // ------------------------------------------------------------------
     // 页面内附件编辑：分块把 blob 传进原生
     // ------------------------------------------------------------------
@@ -757,11 +772,27 @@ public class MainActivity extends Activity {
 
     @Override
     public void onBackPressed() {
-        if (webView != null && webView.canGoBack()) {
-            webView.goBack();
-        } else {
+        if (webView == null) {
             super.onBackPressed();
+            return;
         }
+        // 先让页面自己处理（设置页 / 弹层），没人处理时再走 WebView 历史或退出
+        webView.evaluateJavascript(
+                "(window.__whaleBack ? window.__whaleBack() : 'none')",
+                value -> {
+                    if (value != null && value.contains("closed")) {
+                        return;
+                    }
+                    if (webView != null && webView.canGoBack()) {
+                        webView.goBack();
+                    } else {
+                        backOut();
+                    }
+                });
+    }
+
+    private void backOut() {
+        super.onBackPressed();
     }
 
     @Override
@@ -809,6 +840,18 @@ public class MainActivity extends Activity {
         @JavascriptInterface
         public void endImageTransfer(int id) {
             activity.finishImageTransfer(id);
+        }
+
+        /** 供「关于」弹窗显示：版本名 + 版本号。 */
+        @JavascriptInterface
+        public String appVersion() {
+            try {
+                android.content.pm.PackageInfo info = activity.getPackageManager()
+                        .getPackageInfo(activity.getPackageName(), 0);
+                return info.versionName + " (" + info.getLongVersionCode() + ")";
+            } catch (Exception e) {
+                return "";
+            }
         }
     }
 

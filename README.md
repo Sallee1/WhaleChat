@@ -92,6 +92,7 @@ The `pid` changes every time the app restarts — run `adb forward --remove-all`
   - `BLOB_DOWNLOAD_HOOK` — intercepts `a[download]` with `blob:` hrefs;
   - `IMAGE_TOOLS_HOOK` — click interception on attachment thumbnails and sent-message images; `window.__androidImageEdited(id, dataUrl)` writes the edited image back into the file input and fires `change`.
 - `ImageEditorView` — bitmap + stroke list; rotate/crop bake the strokes into the bitmap first. `ImageEditActivity` samples the input (max edge 2048), applies EXIF orientation, and writes JPEG quality 88 to the cache.
+- `app/src/main/assets/whalechat/ui.js` — UI patch: rebrands the title/brand to WhaleChat and lays an official-app-style full-page settings screen over chat-demo's own settings dialog. The original dialog is hidden by CSS and used as a headless engine — every tap on the new page is forwarded to the real engine control (read state, click button), so behaviour stays identical to chat-demo, only the skin changes. Copy follows the engine language (zh/en). Adds the `appVersion()` bridge for the About sheet and `window.__whaleBack()` so the hardware back key closes sheets/settings first.
 
 ## Updating the bundled web app
 
