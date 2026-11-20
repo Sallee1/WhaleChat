@@ -174,6 +174,43 @@
     try { if (trigger) trigger.click(); } catch (e) {}
   }
 
+  // 找到当前挂在文档上的、属于该 trigger 的下拉框（listbox 的 aria-label 与 trigger 相同）
+  function listboxFor(trigger) {
+    var all = qa('[role="listbox"]').filter(function (b) { return b.isConnected; });
+    if (!all.length) return null;
+    var label = (trigger && trigger.getAttribute('aria-label')) || '';
+    if (!label) return all[all.length - 1];
+    for (var i = all.length - 1; i >= 0; i--) {
+      if (all[i].getAttribute('aria-label') === label) return all[i];
+    }
+    return null;
+  }
+
+  // 选中引擎下拉里的某一项。
+  // 关键：引擎的「点到外面就关下拉」会在手指按下的同一瞬间把 listbox 卸掉，
+  // 之前缓存的 option 元素已经脱离文档，点它不会有任何反应（表现为「窗口关了但没设置成功」）。
+  // 所以这里不缓存节点，而是现找 / 重开一次下拉，再点当时的那个 option。
+  async function pickEngineOption(trigger, label, index) {
+    if (!trigger || trigger.disabled) return false;
+    if (listboxFor(trigger)) {          // 还开着就先收起来，免得下面点 trigger 反而是关闭
+      trigger.click();
+      await sleep(140);
+    }
+    trigger.click();
+    await sleep(240);
+    var box = listboxFor(trigger);
+    if (!box) return false;
+    var opts = qa('[role="option"]', box);
+    var target = null, i;
+    for (i = 0; i < opts.length; i++) {
+      if (text(opts[i]) === label) { target = opts[i]; break; }
+    }
+    if (!target) target = opts[index] || null;
+    if (!target) return false;
+    target.click();
+    return true;
+  }
+
   function setNativeValue(input, value) {
     var setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
     setter.call(input, value);
@@ -332,12 +369,13 @@
     if (!trig || trig.disabled) return;
     var menu = await openEngineMenu(trig);
     if (!menu) return;
+    var labels = menu.options.map(function (o) { return text(o); });
     var items = menu.options.map(function (o) {
       return { label: text(o), active: o.getAttribute('aria-selected') === 'true' };
     });
     openOptionSheet(title, items, async function (i) {
       closeLayer();
-      if (menu.options[i]) menu.options[i].click();
+      await pickEngineOption(trig, labels[i], i);
       await sleep(280);
       await refresh();
     }, function () { closeEngineMenu(trig); });
@@ -372,12 +410,13 @@
       var trig = trigs[i];
       var menu = await openEngineMenu(trig);
       if (!menu) return;
+      var labels = menu.options.map(function (o) { return text(o); });
       var opts = menu.options.map(function (o) {
         return { label: text(o), active: o.getAttribute('aria-selected') === 'true' };
       });
       openOptionSheet(t('choose'), opts, async function (k) {
         closeLayer();
-        if (menu.options[k]) menu.options[k].click();
+        await pickEngineOption(trig, labels[k], k);
         await sleep(300);
         await refresh();
       }, function () { closeEngineMenu(trig); });
