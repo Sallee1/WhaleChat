@@ -5,18 +5,29 @@ plugins {
     id("com.android.application")
 }
 
-// 签名信息放在仓库外的 keystore.properties（已在 .gitignore 里），没有该文件也能正常构建 debug 包。
-// 文件内容示例：
-//   storeFile=../../keystore/whalechat.jks
-//   storePassword=******
-//   keyAlias=whalechat
-//   keyPassword=******
+// 签名信息的来源，按优先级：
+//   1. Gradle 属性 RELEASE_STORE_FILE / RELEASE_STORE_PASSWORD / RELEASE_KEY_ALIAS / RELEASE_KEY_PASSWORD
+//      （可以写在 ~/.gradle/gradle.properties 里，也可以 -P 传入，或用同名环境变量）
+//   2. 仓库根目录的 keystore.properties（不进版本库）
+// 两者都没有时 release 包不签名，但仍然可以编译。
 val keystorePropsFile = rootProject.file("keystore.properties")
 val keystoreProps = Properties().apply {
     if (keystorePropsFile.exists()) {
         FileInputStream(keystorePropsFile).use { load(it) }
     }
 }
+
+fun signingValue(gradleName: String, fileKey: String): String? {
+    val value = providers.gradleProperty(gradleName).orNull
+        ?: System.getenv(gradleName)
+        ?: keystoreProps.getProperty(fileKey)
+    return value?.takeIf { it.isNotBlank() }
+}
+
+val releaseStoreFile = signingValue("RELEASE_STORE_FILE", "storeFile")
+val releaseStorePassword = signingValue("RELEASE_STORE_PASSWORD", "storePassword")
+val releaseKeyAlias = signingValue("RELEASE_KEY_ALIAS", "keyAlias")
+val releaseKeyPassword = signingValue("RELEASE_KEY_PASSWORD", "keyPassword")
 
 android {
     namespace = "com.sallee.whalechat"
@@ -32,12 +43,12 @@ android {
     }
 
     signingConfigs {
-        if (keystoreProps.getProperty("storeFile") != null) {
+        if (releaseStoreFile != null) {
             create("release") {
-                storeFile = rootProject.file(keystoreProps.getProperty("storeFile"))
-                storePassword = keystoreProps.getProperty("storePassword")
-                keyAlias = keystoreProps.getProperty("keyAlias")
-                keyPassword = keystoreProps.getProperty("keyPassword")
+                storeFile = file(releaseStoreFile)
+                storePassword = releaseStorePassword
+                keyAlias = releaseKeyAlias
+                keyPassword = releaseKeyPassword
             }
         }
     }

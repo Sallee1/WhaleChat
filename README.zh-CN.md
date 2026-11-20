@@ -45,30 +45,33 @@ export JAVA_HOME=/path/to/jdk-21
 
 ### 正式包签名
 
-签名信息从仓库根目录的 `keystore.properties` 读取，该文件**不进版本库**：
+签名信息从 Gradle 属性（或同名环境变量）读取，keystore 本身不进仓库：
 
 ```properties
-storeFile=../keystore/whalechat.jks
-storePassword=******
-keyAlias=whalechat
-keyPassword=******
+# ~/.gradle/gradle.properties
+RELEASE_STORE_FILE=/绝对路径/whalechat.jks
+RELEASE_STORE_PASSWORD=******
+RELEASE_KEY_ALIAS=whalechat
+RELEASE_KEY_PASSWORD=******
 ```
+
+（也兼容仓库根目录的 `keystore.properties`：`storeFile` / `storePassword` / `keyAlias` / `keyPassword`。）
 
 keystore 生成一次即可：
 
 ```bash
-keytool -genkeypair -v -keystore keystore/whalechat.jks -alias whalechat \
+keytool -genkeypair -v -keystore whalechat.jks -alias whalechat \
         -keyalg RSA -keysize 2048 -validity 10000
 ```
 
 之后：
 
 ```bash
-./gradlew assembleRelease    # APK
+./gradlew assembleRelease    # APK -> app/build/outputs/apk/release/app-release.apk
 ./gradlew bundleRelease      # AAB
 ```
 
-没有 `keystore.properties` 时 release 包不签名，但照样能编译。
+两者都没有时 release 包不签名，但照样能编译。
 
 ## 安装与调试
 

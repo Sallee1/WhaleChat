@@ -45,30 +45,35 @@ export JAVA_HOME=/path/to/jdk-21
 
 ### Release build
 
-Signing is read from `keystore.properties` in the repo root, which is **not** committed:
+Signing values are read from Gradle properties (or same-named environment variables), so the
+keystore never enters the repository:
 
 ```properties
-storeFile=../keystore/whalechat.jks
-storePassword=******
-keyAlias=whalechat
-keyPassword=******
+# ~/.gradle/gradle.properties
+RELEASE_STORE_FILE=/absolute/path/to/whalechat.jks
+RELEASE_STORE_PASSWORD=******
+RELEASE_KEY_ALIAS=whalechat
+RELEASE_KEY_PASSWORD=******
 ```
+
+(A `keystore.properties` file in the repo root with `storeFile` / `storePassword` / `keyAlias` /
+`keyPassword` is accepted as a fallback.)
 
 Create the keystore once:
 
 ```bash
-keytool -genkeypair -v -keystore keystore/whalechat.jks -alias whalechat \
+keytool -genkeypair -v -keystore whalechat.jks -alias whalechat \
         -keyalg RSA -keysize 2048 -validity 10000
 ```
 
 Then:
 
 ```bash
-./gradlew assembleRelease    # APK
+./gradlew assembleRelease    # APK -> app/build/outputs/apk/release/app-release.apk
 ./gradlew bundleRelease      # AAB
 ```
 
-Without `keystore.properties` the release build is unsigned and still compiles.
+Without any of those properties the release build is unsigned and still compiles.
 
 ## Install & debug
 
