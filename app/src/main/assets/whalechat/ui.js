@@ -419,6 +419,11 @@
         await pickEngineOption(trig, labels[k], k);
         await sleep(300);
         await refresh();
+        // 中国区是「省份 + 城市」两级：选完省份回到位置信息子窗口，接着就能选市
+        if (i === 0 && trigs.length > 1) {
+          await sleep(120);
+          await openLocationSheet();
+        }
       }, function () { closeEngineMenu(trig); });
     });
   }
