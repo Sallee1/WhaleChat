@@ -753,11 +753,15 @@ public class MainActivity extends Activity {
         }
     }
 
-    /** 注入 WhaleChat 界面补丁脚本（带版本号，避免升级后命中 WebView 缓存）。 */
+    /** 注入 WhaleChat 界面补丁脚本（版本号取脚本内容指纹，改了 ui.js 就一定不会命中 WebView 缓存）。 */
     private String uiPatchLoader() {
-        long version = 0;
-        try {
-            version = getPackageManager().getPackageInfo(getPackageName(), 0).getLongVersionCode();
+        String version = "0";
+        try (java.io.InputStream in = getAssets().open("whalechat/ui.js")) {
+            java.util.zip.CRC32 crc = new java.util.zip.CRC32();
+            byte[] buf = new byte[8192];
+            int n;
+            while ((n = in.read(buf)) > 0) crc.update(buf, 0, n);
+            version = Long.toHexString(crc.getValue());
         } catch (Exception ignored) {
         }
         return "(function(){if(document.getElementById('whale-ui'))return;" +

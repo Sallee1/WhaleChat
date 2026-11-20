@@ -271,7 +271,8 @@
     await useTab(1);
     cs = engineCells();
     var keyInput = cs[0] ? q('input', cs[0]) : null;
-    state.apiKeySet = !!(keyInput && keyInput.value);
+    // 已保存态没有输入框，只剩打码的值 +「修改 API Key」按钮
+    state.apiKeySet = keyInput ? !!keyInput.value : !!(cs[0] && q('button', cs[0]));
     state.exportDisabled = !!(cs[2] && q('button', cs[2]) && q('button', cs[2]).disabled);
 
     paint();
@@ -429,10 +430,37 @@
     });
   }
 
-  async function submitApiKey(key) {
+  /* 引擎的账户单元格：没存 key 时是输入框；存了之后标签不变，只是输入框换成打码的值 +「修改 API Key」按钮 */
+  var VERIFYING_RE = /正在验证|验证中|Verifying/i;
+  var KEY_ERROR_RE = /无效|失败|错误|invalid|failed|error/i;
+  var KEY_START_RE = /^(输入\s*API\s*Key\s*开始使用|Enter an API Key to get started)/i;
+
+  async function keyCell() {
     await useTab(1);
-    var cell = engineCells()[0];
-    var input = cell ? q('input', cell) : null;
+    return engineCells()[0] || null;
+  }
+
+  /* 拿到可输入的 key 输入框；已经处于「已保存」态就先点「修改 API Key」切回编辑 */
+  async function findKeyInput() {
+    var cell = await keyCell();
+    if (!cell) return { cell: null, input: null };
+    var input = q('input', cell);
+    if (input) return { cell: cell, input: input };
+    // 已保存态的按钮只有图标（文案在 aria-label 里），且点它只切回编辑、不会真的改 key
+    var edit = q('button', cell);
+    if (edit && !edit.disabled) {
+      edit.click();
+      await sleep(300);
+      cell = engineCells()[0] || cell;
+      input = q('input', cell);
+    }
+    return { cell: cell, input: input || null };
+  }
+
+  async function submitApiKey(key) {
+    var found = await findKeyInput();
+    var cell = found.cell;
+    var input = found.input;
     if (!input) return { ok: false, message: t('keyNoInput') };
     setNativeValue(input, key);
     await sleep(60);
@@ -441,18 +469,20 @@
     input.dispatchEvent(new Event('change', { bubbles: true }));
     try { input.blur(); } catch (e) {}
 
-    for (var i = 0; i < 40; i++) {
-      await sleep(500);
-      // 单元格文案 = 占位提示 + 校验结果，去掉占位提示只留引擎的提示语
-      var raw = text(cell);
-      var now = raw
-        .replace(/^(输入\s*API\s*Key\s*开始使用|Enter an API Key to get started)/i, '')
-        .trim();
-      if (/无效|失败|错误|invalid|failed|error/i.test(now)) {
-        return { ok: false, message: now.slice(0, 80) };
-      }
-      // 占位提示消失 → 引擎已经收下这个 key
-      if (!/开始使用|get started/i.test(raw)) return { ok: true };
+    // 最多等 60s。校验中的按钮文案会变成「正在验证…」；成功后输入框被换成打码的值 + 修改按钮。
+    // 超时不算失败：请求可能还在后台跑，下一次保存会先看单元格是不是已经切到已保存态。
+    for (var i = 0; i < 150; i++) {
+      await sleep(400);
+      var cellNow = engineCells()[0] || cell;
+      if (!cellNow || !cellNow.isConnected) return { ok: true };   // 设置弹窗被引擎关掉 = 收下了
+      var inputNow = q('input', cellNow);
+      var btn = q('button', cellNow);
+      var verifying = !!(btn && VERIFYING_RE.test(text(btn)));
+      if (verifying) continue;
+      var rest = text(cellNow).replace(KEY_START_RE, '').trim();
+      if (KEY_ERROR_RE.test(rest)) return { ok: false, message: rest.slice(0, 80) };
+      // 输入框没了、但单元格里还有「修改 API Key」按钮 → 引擎已经存下这个 key
+      if (!inputNow && btn) return { ok: true };
     }
     return { ok: false, message: t('keyTimeout') };
   }
