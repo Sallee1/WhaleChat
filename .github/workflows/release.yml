@@ -1,0 +1,119 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: '要发布的 tag（如 v1.0.0）'
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref_name }}
+          fetch-depth: 0
+
+      - name: Resolve tag
+        id: tag
+        run: |
+          NAME="${{ inputs.tag || github.ref_name }}"
+          git rev-parse -q --verify "refs/tags/$NAME" >/dev/null || {
+            echo "::error::tag $NAME 不存在，请先推送 tag"
+            exit 1
+          }
+          echo "name=$NAME" >> "$GITHUB_OUTPUT"
+          VERSION_NAME="$(sed -n 's/.*versionName = "\(.*\)".*/\1/p' app/build.gradle.kts)"
+          if [ "$VERSION_NAME" != "${NAME#v}" ]; then
+            echo "::warning::tag $NAME 与 build.gradle.kts 的 versionName $VERSION_NAME 不一致"
+          fi
+
+      - name: Generate release notes
+        id: notes
+        env:
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+          TAG: ${{ steps.tag.outputs.name }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: |
+          NOTES="$RUNNER_TEMP/release-notes.md"
+          if [ -f ".release-notes-${TAG#v}.md" ]; then
+            cp ".release-notes-${TAG#v}.md" "$NOTES"
+            echo "Using the hand-written .release-notes-${TAG#v}.md"
+          else
+            if [ -z "$DEEPSEEK_API_KEY" ]; then
+              echo "::warning::secret DEEPSEEK_API_KEY is not set, keeping the changelog in English"
+            fi
+            if ! python3 tools/changelog.py --tag "$TAG" --output "$NOTES" --translate; then
+              echo "::warning::changelog generation failed, falling back to GitHub's generated notes"
+              : > "$NOTES"
+            fi
+          fi
+          echo "path=$NOTES" >> "$GITHUB_OUTPUT"
+          {
+            echo "### Release notes for $TAG"
+            echo
+            cat "$NOTES"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Decode keystore
+        env:
+          KEYSTORE_BASE64: ${{ secrets.RELEASE_KEYSTORE_BASE64 }}
+        run: |
+          if [ -z "$KEYSTORE_BASE64" ]; then
+            echo "::error::缺少仓库 secret RELEASE_KEYSTORE_BASE64"
+            exit 1
+          fi
+          printf '%s' "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.jks"
+
+      - name: Build signed release APK
+        env:
+          RELEASE_STORE_FILE: ${{ runner.temp }}/release.jks
+          RELEASE_STORE_PASSWORD: ${{ secrets.RELEASE_STORE_PASSWORD }}
+          RELEASE_KEY_ALIAS: ${{ secrets.RELEASE_KEY_ALIAS }}
+          RELEASE_KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleRelease --no-daemon --stacktrace
+
+      - name: Verify signature
+        run: |
+          SDK="${ANDROID_SDK_ROOT:-$ANDROID_HOME}"
+          BT="$(ls "$SDK/build-tools" | sort -V | tail -1)"
+          "$SDK/build-tools/$BT/apksigner" verify --print-certs \
+            app/build/outputs/apk/release/app-release.apk
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.tag.outputs.name }}
+          NOTES: ${{ steps.notes.outputs.path }}
+        run: |
+          APK=app/build/outputs/apk/release/app-release.apk
+          ASSET="WhaleChat-${TAG#v}.apk"
+          TITLE="WhaleChat ${TAG#v}"
+          if [ -s "$NOTES" ]; then
+            NOTES_ARGS=(--notes-file "$NOTES")
+          else
+            NOTES_ARGS=(--generate-notes)
+          fi
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" "$APK#$ASSET" --clobber
+            if [ -s "$NOTES" ]; then
+              gh release edit "$TAG" --title "$TITLE" --notes-file "$NOTES"
+            fi
+          else
+            gh release create "$TAG" "$APK#$ASSET" --title "$TITLE" "${NOTES_ARGS[@]}"
+          fi
