@@ -233,6 +233,9 @@ public class MainActivity extends Activity {
     private int transferSeq = 0;
     private final Map<Integer, ImageTransfer> transfers = new LinkedHashMap<>();
 
+    /** 页面里是否有发往 DeepSeek 的流式请求，见 GenerationService。 */
+    private volatile boolean generationActive = false;
+
     @SuppressLint("SetJavaScriptEnabled")
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -262,6 +265,10 @@ public class MainActivity extends Activity {
         settings.setSupportZoom(false);
         settings.setBuiltInZoomControls(false);
         settings.setDisplayZoomControls(false);
+
+        // 回复是页面里自己发 fetch 收流的：App 进后台后如果渲染进程被降级或回收，
+        // 连接就断了。保持 IMPORTANT 优先级，且不可见时也不放弃该优先级。
+        webView.setRendererPriorityPolicy(WebView.RENDERER_PRIORITY_IMPORTANT, false);
 
         webView.addJavascriptInterface(new Bridge(this), "AndroidBridge");
 
@@ -893,8 +900,35 @@ public class MainActivity extends Activity {
         super.onBackPressed();
     }
 
+    // ------------------------------------------------------------------
+    // 生成期间保活：页面侧 fetch 钩子调用 Bridge.beginGeneration/endGeneration
+    // ------------------------------------------------------------------
+
+    void beginGeneration() {
+        synchronized (this) {
+            if (generationActive) return;
+            generationActive = true;
+        }
+        try {
+            GenerationService.start(this);
+        } catch (RuntimeException e) {
+            // Android 12+ 在后台不允许启动前台服务；页面此时已经不在前台，放弃保活即可
+            generationActive = false;
+        }
+    }
+
+    void endGeneration() {
+        synchronized (this) {
+            if (!generationActive) return;
+            generationActive = false;
+        }
+        GenerationService.stop(this);
+    }
+
     @Override
     protected void onDestroy() {
+        // WebView 一销毁，页面里的流就没了，前台服务也就没有继续存在的意义
+        endGeneration();
         if (webView != null) {
             webView.destroy();
             webView = null;
@@ -938,6 +972,17 @@ public class MainActivity extends Activity {
         @JavascriptInterface
         public void endImageTransfer(int id) {
             activity.finishImageTransfer(id);
+        }
+
+        /** 流式生成开始 / 结束，用来启停 GenerationService。 */
+        @JavascriptInterface
+        public void beginGeneration() {
+            activity.beginGeneration();
+        }
+
+        @JavascriptInterface
+        public void endGeneration() {
+            activity.endGeneration();
         }
 
         /** 供「关于」弹窗显示：版本名 + 版本号。 */

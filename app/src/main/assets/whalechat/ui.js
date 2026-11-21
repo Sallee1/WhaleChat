@@ -34,6 +34,123 @@
     });
   };
 
+  /* ------------------------------------------- 生成期间保活（原生前台服务） */
+  /*
+   * 回复是页面自己向 api.deepseek.com 发 fetch 收 SSE 的。App 一进后台，Android
+   * 会把进程降级，OEM 还可能直接冻结/回收，流式连接就断了。原生侧为此准备了一个
+   * dataSync 前台服务 + 唤醒锁（见 GenerationService.java）：这里包一层 fetch，
+   * 只统计「发往 DeepSeek、body 里 stream:true」的请求，第一个开始时启动服务，
+   * 最后一个流读完后延迟 3 秒停止（引擎失败后 1~2 秒内会自己重试，避免通知闪烁）。
+   *
+   * 只包流式响应：非流式请求（模型列表、文件上传）以及失败响应原样返回。
+   */
+  (function () {
+    if (window.__whaleGenerationHook) return;
+    window.__whaleGenerationHook = true;
+    var bridge = window.AndroidBridge;
+    if (!bridge || !bridge.beginGeneration || !bridge.endGeneration) return;
+
+    var inflight = 0;
+    var stopTimer = 0;
+
+    function begin() {
+      if (stopTimer) {
+        clearTimeout(stopTimer);
+        stopTimer = 0;
+      }
+      inflight += 1;
+      if (inflight === 1) {
+        try { bridge.beginGeneration(); } catch (e) {}
+      }
+    }
+
+    function end() {
+      if (inflight > 0) inflight -= 1;
+      if (inflight > 0 || stopTimer) return;
+      stopTimer = setTimeout(function () {
+        stopTimer = 0;
+        if (inflight !== 0) return;
+        try { bridge.endGeneration(); } catch (e) {}
+      }, 3000);
+    }
+
+    function isStreamingChat(url, init) {
+      if (!url || url.indexOf('api.deepseek.com') < 0) return false;
+      var body = init && init.body;
+      return typeof body === 'string' && /"stream"\s*:\s*true/.test(body);
+    }
+
+    /* 原样转发响应体，同时在流真正读完 / 出错 / 被取消时结束保活 */
+    function wrapResponse(resp) {
+      if (!resp || !resp.body || typeof ReadableStream === 'undefined') {
+        end();
+        return resp;
+      }
+      var reader = resp.body.getReader();
+      var finished = false;
+      function finish() {
+        if (finished) return;
+        finished = true;
+        end();
+      }
+      var stream = new ReadableStream({
+        start: function (controller) {
+          (function pump() {
+            reader.read().then(function (r) {
+              if (r.done) {
+                finish();
+                controller.close();
+                return;
+              }
+              controller.enqueue(r.value);
+              pump();
+            }, function (err) {
+              finish();
+              controller.error(err);
+            });
+          })();
+        },
+        cancel: function (reason) {
+          finish();
+          return reader.cancel(reason);
+        }
+      });
+      try {
+        return new Response(stream, {
+          status: resp.status,
+          statusText: resp.statusText,
+          headers: resp.headers
+        });
+      } catch (e) {
+        finish();
+        return resp;
+      }
+    }
+
+    var origFetch = window.fetch;
+    if (typeof origFetch !== 'function') return;
+    window.fetch = function (input, init) {
+      var url = typeof input === 'string' ? input : (input && input.url) || '';
+      if (!isStreamingChat(url, init)) return origFetch.apply(this, arguments);
+      begin();
+      return origFetch.apply(this, arguments).then(function (resp) {
+        if (!resp || !resp.ok) {
+          end();
+          return resp;
+        }
+        return wrapResponse(resp);
+      }, function (err) {
+        end();
+        throw err;
+      });
+    };
+
+    // 页面被卸载（重新加载 / WebView 销毁）时通知原生收掉服务
+    window.addEventListener('pagehide', function () {
+      try { bridge.endGeneration(); } catch (e) {}
+    });
+  })();
+
   /* ------------------------------------------------------------------ 样式 */
 
   var CSS = [

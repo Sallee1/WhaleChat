@@ -4,6 +4,12 @@
 
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
+
+    <!-- 生成回复期间的前台服务：把进程维持在前台级别，后台 / 熄屏也能把流读完 -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
     <!-- Chromium 的 AudioManager 在录音时会做通信设备选择，缺少该权限会导致
          "Unable to select communication device"，getUserMedia 拿不到音频输入 -->
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
@@ -54,6 +60,11 @@
             android:configChanges="orientation|screenSize|screenLayout|keyboardHidden|uiMode"
             android:exported="false"
             android:theme="@style/Theme.WhaleChat.Editor" />
+
+        <service
+            android:name=".GenerationService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
 
         <!-- 让 Play 服务给 Android 11/12 补装系统照片选择器模块 -->
         <service

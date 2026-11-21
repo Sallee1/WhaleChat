@@ -2,6 +2,10 @@
 <resources>
     <string name="app_name">WhaleChat</string>
     <string name="choose_file">选择文件</string>
+
+    <string name="generation_channel_name">回复生成</string>
+    <string name="generation_channel_description">在后台继续接收 DeepSeek 的回复</string>
+    <string name="generation_notification_text">正在生成回复…</string>
     <string name="choose_photo">选择照片</string>
     <string name="saved_to">已保存到 %1$s</string>
 
