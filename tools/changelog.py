@@ -92,8 +92,7 @@ def repo_slug():
     return os.environ.get("GITHUB_REPOSITORY", "").strip()
 
 
-def build_changelog(tag, commits):
-    version = tag[1:] if tag.startswith("v") else tag
+def build_changelog(commits):
     slug = repo_slug()
     sections = {key: [] for key in TYPE_TITLES}
 
@@ -107,7 +106,8 @@ def build_changelog(tag, commits):
             entry = f"- {text} ({sha[:7]})"
         sections[kind].append(entry)
 
-    lines = [f"# WhaleChat {version}", ""]
+    # No top-level title: GitHub already shows the release title above the body.
+    lines = []
     for kind, title in TYPE_TITLES.items():
         items = sections[kind]
         if items:
@@ -218,7 +218,7 @@ def main():
     from_ref = args.from_ref or previous_tag(args.tag)
     rev_range = f"{from_ref}..{args.tag}" if from_ref else args.tag
     commits = list(read_commits(rev_range))
-    english = build_changelog(args.tag, commits)
+    english = build_changelog(commits)
     changelog = english
 
     if args.translate:
