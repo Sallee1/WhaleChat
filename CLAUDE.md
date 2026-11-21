@@ -74,7 +74,7 @@ chat-demo 自带的设置对话框没有被替换掉，而是被 CSS 隐藏（`b
 - `versionCode` / `versionName` 在 `app/build.gradle.kts` 的 `defaultConfig` 里；每次发版都要改。
 - 签名按优先级读取：Gradle 属性 `RELEASE_STORE_FILE` / `RELEASE_STORE_PASSWORD` / `RELEASE_KEY_ALIAS` / `RELEASE_KEY_PASSWORD` → 同名环境变量 → 仓库根的 `keystore.properties`。密钥材料不进仓库。
 - 发布走 GitHub Actions：推 `v*` tag 触发 `.github/workflows/release.yml`（或手动 `workflow_dispatch` 填 tag），按 tag checkout、构建签名 APK、验签、生成 release notes 并上传。`tools/release.sh <版本号>` 封装了“本地先构建 → 打 annotated tag → 推送”。
-- Release notes 由 `tools/changelog.py` 从上一个 `v*` tag 到当前 tag 的提交生成（按 Conventional Commits 分组），再调 DeepSeek chat API 翻成中文（secret `DEEPSEEK_API_KEY`）；没有 key 或翻译失败时保留英文，不阻塞发布。若仓库存在 `.release-notes-<版本号>.md`，优先使用该手写文件。
+- Release notes 由 `tools/changelog.py` 从上一个 `v*` tag 到当前 tag 的提交生成，**只收录 feat / fix / perf**（build/ci/docs/refactor 等不出现在用户可见说明里），再调 DeepSeek chat API 翻成中文（secret `DEEPSEEK_API_KEY`）。输出是**英文在前、中文在后**（`---` 分隔），末尾是 `Full Changelog` 对比链接；没有 key 或翻译失败时只发英文，不阻塞发布。若仓库存在 `.release-notes-<版本号>.md`，优先使用该手写文件。
 - CI secrets：`RELEASE_KEYSTORE_BASE64`、`RELEASE_STORE_PASSWORD`、`RELEASE_KEY_ALIAS`、`RELEASE_KEY_PASSWORD`、`DEEPSEEK_API_KEY`。
 
 ## 改动约定

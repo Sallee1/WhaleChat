@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """Build a Markdown changelog from the commits since the previous tag.
 
-With --translate the text is additionally translated into Simplified Chinese
-through the DeepSeek chat API. The translation is best effort: when the API is
-unavailable the English changelog is written and a warning goes to stderr, so a
-release is never blocked by the translator.
+Only user-facing changes (feat / fix / perf) are listed. With --translate a
+Simplified Chinese copy is appended below the English changelog through the
+DeepSeek chat API; the English text always stays first. The translation is best
+effort: when the API is unavailable the English changelog is written and a
+warning goes to stderr, so a release is never blocked by the translator.
 
 Usage:
     python3 tools/changelog.py --tag v1.0.2 --output NOTES.md
@@ -27,20 +28,13 @@ import time
 import urllib.error
 import urllib.request
 
-# Order matters: this is the order sections appear in the release notes.
+# Only user-facing changes reach the release notes; build/ci/docs/refactor/... are
+# dropped. Order matters: this is the order sections appear in the release notes.
 TYPE_TITLES = {
     "feat": "Features",
     "fix": "Fixes",
     "perf": "Performance",
-    "refactor": "Refactoring",
-    "build": "Build",
-    "ci": "CI",
-    "docs": "Documentation",
-    "test": "Tests",
-    "revert": "Reverts",
-    "chore": "Chores",
 }
-OTHER_TITLE = "Other changes"
 
 SUBJECT_RE = re.compile(r"^(?P<type>[A-Za-z]+)(?:\([^)]*\))?!?:\s*(?P<subject>.+)$")
 CHUNK_LIMIT = 6000
@@ -98,19 +92,20 @@ def repo_slug():
     return os.environ.get("GITHUB_REPOSITORY", "").strip()
 
 
-def build_changelog(tag, from_ref, commits):
+def build_changelog(tag, commits):
     version = tag[1:] if tag.startswith("v") else tag
     slug = repo_slug()
     sections = {key: [] for key in TYPE_TITLES}
-    other = []
 
     for sha, subject, _body in commits:
         kind, text = classify(subject)
+        if not kind:
+            continue
         if slug:
             entry = f"- {text} ([{sha[:7]}](https://github.com/{slug}/commit/{sha}))"
         else:
             entry = f"- {text} ({sha[:7]})"
-        (sections[kind] if kind else other).append(entry)
+        sections[kind].append(entry)
 
     lines = [f"# WhaleChat {version}", ""]
     for kind, title in TYPE_TITLES.items():
@@ -119,17 +114,16 @@ def build_changelog(tag, from_ref, commits):
             lines.extend([f"## {title}", ""])
             lines.extend(items)
             lines.append("")
-    if other:
-        lines.extend([f"## {OTHER_TITLE}", ""])
-        lines.extend(other)
-        lines.append("")
-    if not any(sections.values()) and not other:
+    if not any(sections.values()):
         lines.extend(["_No user-facing changes._", ""])
-
-    if slug and from_ref:
-        compare = f"https://github.com/{slug}/compare/{from_ref}...{tag}"
-        lines.extend([f"**Full Changelog**: {compare}", ""])
     return "\n".join(lines).rstrip() + "\n"
+
+
+def compare_link(tag, from_ref):
+    slug = repo_slug()
+    if not slug or not from_ref:
+        return ""
+    return f"**Full Changelog**: https://github.com/{slug}/compare/{from_ref}...{tag}"
 
 
 def chunk_text(text, limit=CHUNK_LIMIT):
@@ -215,7 +209,7 @@ def main():
     parser.add_argument(
         "--translate",
         action="store_true",
-        help="translate the changelog into Simplified Chinese with the DeepSeek API",
+        help="append a Simplified Chinese translation below the English changelog",
     )
     parser.add_argument("--api-base", default=os.environ.get("DEEPSEEK_API_BASE", "https://api.deepseek.com"))
     parser.add_argument("--model", default=os.environ.get("DEEPSEEK_MODEL", "deepseek-chat"))
@@ -224,17 +218,24 @@ def main():
     from_ref = args.from_ref or previous_tag(args.tag)
     rev_range = f"{from_ref}..{args.tag}" if from_ref else args.tag
     commits = list(read_commits(rev_range))
-    changelog = build_changelog(args.tag, from_ref, commits)
+    english = build_changelog(args.tag, commits)
+    changelog = english
 
     if args.translate:
         api_key = os.environ.get("DEEPSEEK_API_KEY", "").strip()
         if not api_key:
-            print("warning: DEEPSEEK_API_KEY is not set, keeping the English changelog", file=sys.stderr)
+            print("warning: DEEPSEEK_API_KEY is not set, publishing the changelog in English only", file=sys.stderr)
         else:
             try:
-                changelog = translate(changelog, api_key, args.api_base, args.model)
+                chinese = translate(english, api_key, args.api_base, args.model)
+                # English first, translated copy below it.
+                changelog = english.rstrip("\n") + "\n\n---\n\n" + chinese
             except Exception as error:  # noqa: BLE001 - a failed translation must not break the release
-                print(f"warning: translation failed ({error}), keeping the English changelog", file=sys.stderr)
+                print(f"warning: translation failed ({error}), publishing the changelog in English only", file=sys.stderr)
+
+    link = compare_link(args.tag, from_ref)
+    if link:
+        changelog = changelog.rstrip() + "\n\n" + link + "\n"
 
     with open(args.output, "w", encoding="utf-8", newline="\n") as handle:
         handle.write(changelog)
