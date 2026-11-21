@@ -104,6 +104,11 @@ jobs:
           APK=app/build/outputs/apk/release/app-release.apk
           ASSET="WhaleChat-${TAG#v}.apk"
           TITLE="WhaleChat ${TAG#v}"
+          # gh keeps the file's basename as the asset name; `path#label` only sets
+          # the display label, so copy the APK to the name we want first.
+          mkdir -p "$RUNNER_TEMP/dist"
+          cp "$APK" "$RUNNER_TEMP/dist/$ASSET"
+          APK="$RUNNER_TEMP/dist/$ASSET"
           if [ -s "$NOTES" ]; then
             NOTES_ARGS=(--notes-file "$NOTES")
           else
