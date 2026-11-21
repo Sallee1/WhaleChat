@@ -128,6 +128,28 @@
   styleEl.textContent = CSS;
   (document.head || document.documentElement).appendChild(styleEl);
 
+  /* --------------------------------------------------- Enter 改为换行 */
+
+  /*
+   * chat-demo 的聊天输入框把 Enter 当发送键（Shift+Enter 才是换行），这与手机输入法
+   * 的习惯冲突。在捕获阶段拦住普通 Enter，让事件到不了 React 的 onKeyDown（否则会发送）；
+   * 但不 preventDefault，浏览器仍会执行 textarea 自身的换行默认行为 —— 效果等同于
+   * 把 Enter 改写成 Shift+Enter。
+   */
+  function isChatComposer(el) {
+    if (!el || el.tagName !== 'TEXTAREA' || !el.isConnected) return false;
+    // 消息编辑框自带 aria-label，Enter 在那里仍然是「保存」，不拦截
+    if (el.getAttribute('aria-label')) return false;
+    return !!(el.placeholder && el.placeholder.trim());
+  }
+
+  document.addEventListener('keydown', function (e) {
+    if (e.key !== 'Enter' || e.shiftKey || e.ctrlKey || e.metaKey || e.altKey) return;
+    if (e.isComposing || e.keyCode === 229) return;   // 输入法组词中的确认键
+    if (!isChatComposer(e.target)) return;
+    e.stopPropagation();
+  }, true);
+
   /* ------------------------------------------------------- 引擎（原设置页） */
 
   function engineDialog() {
